@@ -1,0 +1,123 @@
+---
+title: "LAPS parcels release file generator"
+author: Johanna LK Wren
+date: June 11, 2021
+output:
+  html_notebook:
+    theme: flatly
+    toc: true
+    toc_float:
+      collapsed: false
+      tod_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '~/Desktop/')  # this sets the default working directory for your script. Change it to fit the folder you are working in
+```
+
+# Description
+This code generates a .csv file with release locations, date of release, and number of particle to be released to be used in the LAPS OceaParcels runs.
+
+I am focusing the release on high spawning months, which are December-January, but keeping a little background spawning year round. 
+
+We are releasing from 10 sites (not including any sites in Hawaii for this initial run, but that can easily be added later.)
+
+# Load libraries
+```{r}
+library(ncdf4)
+library(lubridate)
+library(dplyr)
+library(purrr)
+```
+
+# Read in data
+The output file needs to contain the lat and lon for the release, which site (island) that location belongs to, the date, and the number of particles to release. We can use the LAPS_release_sites.csv document as a base along with the start and end dates of the simulation. 
+
+```{r}
+# Read in relevant files
+pts <- read.csv('LAPS_release_sites.csv')
+pts <- filter(pts, !Site %in% c(8,9))  # Remove Big Island and Oahu for now
+fls <- list.files(path='HYCOM_onaga/', pattern='HYCOM_LAPS*')
+ndays <- length(fls)
+
+# Get time from the first file
+dat <- nc_open(paste0('HYCOM_onaga/',fls[1]))
+t1  <- ncvar_get(dat, 'TIME')
+t2 <- ncvar_get(nc_open(paste0('HYCOM_onaga/',fls[ndays])), 'TIME')
+tunit <- dat$dim$TIME$units
+tustr <- strsplit(tunit, " ")
+stime <- as.POSIXct(unlist(tustr)[3])
+start_time <- as.POSIXct(t1, origin=stime)
+end_time <- as.POSIXct(t2, origin=stime)
+nc_close(dat)
+
+# time vector
+dateVec <- data.frame(Date=seq(ymd(as.POSIXct(t1, origin=stime)), ymd(as.POSIXct(t2, origin=stime)), by='day'))
+dateVec$DateIndex <- seq(0, 86400*length(dateVec$Date)-1, by=86400)
+
+# pull out spawning and no spawning dates
+spawn <- dateVec[which(month(dateVec$Date) %in% c(1, 12)),]
+nospawn <- dateVec[(!dateVec$Date %in% spawn$Date),]
+```
+
+We are releasing 10 particles every five days or so (this can be changed according to output size, maybe 1/week if need even less, but I wanted some basic level of background spawning) during non-spawning seasons and 100 particles daily during spawning season in Dec-Jan. 
+```{r}
+# Make release date vector
+spawn100 <- spawn %>% slice(rep(1:n(), each=100))
+nospawn10 <- nospawn %>% slice(seq(1,n(),by=5)) %>% slice(rep(1:n(), each=10))
+releaseDates <- data.frame(rbind(spawn100, nospawn10))
+#as.numeric(release$Date-as.Date(start_time))*86400
+
+# Combine with site data
+release <- releaseDates$Date %>% 
+  map_dfr(~ cbind(pts, Date=.x)) %>% 
+  full_join(releaseDates)
+```
+Save file
+```{r}
+write.csv(release, 'LAPS_particle_release.csv', quote=F, row.names=F)
+```
+
+
+```{r}
+# Read in relevant files
+pts <- read.csv('LAPS_release_sites.csv')
+pts <- filter(pts, !Site %in% c(8,9))  # Remove Big Island and Oahu for now
+fls <- list.files(path='HYCOM_onaga/', pattern='HYCOM_LAPS*')
+ndays <- length(fls)
+
+# Get time from the first file
+dat <- nc_open(paste0('HYCOM_onaga/',fls[1]))
+t1  <- ncvar_get(dat, 'TIME')
+t2 <- ncvar_get(nc_open(paste0('HYCOM_onaga/',fls[ndays])), 'TIME')
+tunit <- dat$dim$TIME$units
+tustr <- strsplit(tunit, " ")
+stime <- as.POSIXct(unlist(tustr)[3])
+start_time <- as.POSIXct(t1, origin=stime)
+end_time <- as.POSIXct(t2, origin=stime)
+nc_close(dat)
+
+# time vector
+dateVec <- data.frame(Date=seq(ymd(as.POSIXct(t1, origin=stime)), ymd(as.POSIXct(t2, origin=stime)), by='day'))
+dateVec$DateIndex <- seq(0, 86400*length(dateVec$Date)-1, by=86400)
+
+# pull out spawning and no spawning dates
+spawn <- dateVec[which(month(dateVec$Date) %in% c(1, 12)),]
+nospawn <- dateVec[(!dateVec$Date %in% spawn$Date),]
+```
+
+We are releasing 10 particles every five days or so (this can be changed according to output size, maybe 1/week if need even less, but I wanted some basic level of background spawning) during non-spawning seasons and 100 particles daily during spawning season in Dec-Jan. 
+```{r}
+# Make release date vector
+spawn100 <- spawn %>% slice(rep(1:n(), each=100))
+nospawn10 <- nospawn %>% slice(seq(1,n(),by=5)) %>% slice(rep(1:n(), each=10))
+releaseDates <- data.frame(rbind(spawn100, nospawn10))
+#as.numeric(release$Date-as.Date(start_time))*86400
+
+# Combine with site data
+release <- releaseDates$Date %>% 
+  map_dfr(~ cbind(pts, Date=.x)) %>% 
+  full_join(releaseDates)
+write.csv(release, 'LAPS_particle_release.csv', quote=F, row.names=F)
+```
+
